@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 from typing import Union, Tuple, Dict
 import numpy as np
 import logging
@@ -80,13 +80,24 @@ class TVProgrammingEnvironment:
         )
 
 
-    def get_available_movies(self, date: datetime):
-        """Get movies available for the given context (rights not expired), updates self.available_movies"""
+    def get_available_movies(self, date: Union[datetime, date]):
+        """
+        Get movies available for the given context (rights not expired), updates self.available_movies.
 
-        available_mask = ((self.catalog_df['tv_rights_end'] > date) &
-                            (self.catalog_df['tv_rights_start'] < date) &
+        Args:
+            date: Date to check availability (datetime or date object)
+
+        Note:
+            Converts input to pd.Timestamp to ensure compatibility with datetime64[ns] columns
+            after enforce_dtypes() is applied to the catalog.
+        """
+        # Convert to pandas Timestamp for comparison with datetime64[ns] columns
+        date_ts = pd.Timestamp(date)
+
+        available_mask = ((self.catalog_df['tv_rights_end'] > date_ts) &
+                            (self.catalog_df['tv_rights_start'] < date_ts) &
                             (self.catalog_df['available_broadcasts'] > 0))
-        
+
         self.available_movies = self.catalog_df[available_mask].index.tolist()
 
 
@@ -127,12 +138,8 @@ class TVProgrammingEnvironment:
         features = []
 
         # Slot hour of showing into 4 different TimeSlot
-        try:
-            time_slot_value = self.get_time_slot(hour).value
-        except:
-            logger.info(hour)
+        time_slot_value = self.get_time_slot(hour).value
         time_slots = [time_slot.value for time_slot in TimeSlot]
-
         time_slot_features = [1 if time_slot == time_slot_value else 0 for time_slot in time_slots]
         features.extend(time_slot_features)
 
@@ -160,12 +167,23 @@ class TVProgrammingEnvironment:
 
 
     def get_movie_features(self, catalog_id: str) -> np.ndarray:
-        """Get normalized movie features for the given catalog_id to be used to compute reward/value signals"""
+        """
+        Get normalized movie features for the given catalog_id to be used to compute reward/value signals.
+
+        Args:
+            catalog_id: The catalog ID (string) to retrieve features for
+
+        Returns:
+            np.ndarray: Normalized movie features
+
+        Raises:
+            KeyError: If catalog_id not found in catalog
+        """
         try:
             film_catalog_row: pd.Series = self.catalog_df.loc[catalog_id]
-        except:
-            logger.info(f"Catalog ID {catalog_id} not found in catalog")
-            #TODO: handle missing catalog ID
+        except KeyError:
+            logger.error(f"Catalog ID {catalog_id} not found in catalog")
+            raise KeyError(f"Catalog ID {catalog_id} not found in catalog")
 
         features = pd.DataFrame({
         'norm_revenue': self.scaler_dict['revenue'].transform(pd.DataFrame({'revenue': [film_catalog_row['revenue']]}))[0][0],
@@ -194,15 +212,21 @@ class TVProgrammingEnvironment:
         movie_features = np.squeeze(np.array(features, dtype=np.float32))
         return movie_features
 
-    def get_time_slot(self, hour: int) -> TimeSlot | None:
+    def get_time_slot(self, hour: int) -> TimeSlot:
+        """
+        Map hour of day to time slot.
 
+        Hours 0-5 (midnight to 6am) are considered LATE_NIGHT (continuation from previous day).
+        """
         if 6 <= hour < 14:
             return TimeSlot.MORNING
         elif 14 <= hour < 19:
             return TimeSlot.AFTERNOON
         elif 19 <= hour < 22:
             return TimeSlot.PRIME_TIME
-        elif 22 <= hour < 26:
+        elif 22 <= hour < 26:  # 22-26 handles up to 2am as hour 24, 25, 26
+            return TimeSlot.LATE_NIGHT
+        elif 0 <= hour < 6:  # Midnight to 6am is also late night
             return TimeSlot.LATE_NIGHT
         else:
-            return None  # outside defined slots
+            raise ValueError(f"Invalid hour: {hour}. Expected 0-26.")
