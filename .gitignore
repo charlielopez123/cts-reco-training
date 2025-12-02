@@ -36,3 +36,12 @@ models/**
 .claude
 CLAUDE.md
 GEMINI.md
+
+# --- Documentation (markdown files) ---
+docs/**/*.md
+*.md
+!README.md
+!baselines_evaluation/README.md
+
+# --- macOS files ---
+.DS_Store
