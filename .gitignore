@@ -34,5 +34,6 @@ models/**
 
 # --- AI related docs ---
 .claude
-CLAUDE.md
-GEMINI.md
+
+# --- Markdown files ---
+*.md
