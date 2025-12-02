@@ -53,6 +53,17 @@ def process_tmdb_features(df: pd.DataFrame, is_movie: bool = True) -> pd.DataFra
     else:
         df.loc[:, 'genres'] = [[] for _ in range(len(df))]
 
+    # Keywords
+    if is_movie:
+        if 'keywords' in df.columns:
+            df['keywords'] = df['keywords'].apply(
+                lambda x: x.tolist() if isinstance(x, np.ndarray) else (x if isinstance(x, list) else [])
+            )
+        else:
+            df.loc[:, 'keywords'] = [[] for _ in range(len(df))]
+    else:
+        df.loc[:, 'keywords'] = [[] for _ in range(len(df))]
+
     # Release date and missing flag
     if is_movie:
         df['release_date'] = np.where(
@@ -125,6 +136,33 @@ def add_genre_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Drop intermediate columns
     df = df.drop(columns=['genres', 'genre_names'])
+
+    return df
+
+
+def extract_keyword_names(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extract keyword names from TMDB keywords list.
+
+    Keywords come as list of dicts: [{"id": 123, "name": "space"}]
+    This function extracts just the names as a list of strings.
+
+    Note: Unlike genres, we keep keywords as a list column rather than
+    one-hot encoding, as there are thousands of possible keywords.
+
+    Parameters:
+    df (pd.DataFrame): DataFrame with 'keywords' column (list of dicts with 'name' key)
+
+    Returns:
+    pd.DataFrame: DataFrame with 'keywords' column converted to list of strings
+    """
+    df = df.copy()
+
+    # Extract keyword names from list of dicts
+    if 'keywords' in df.columns:
+        df['keywords'] = df['keywords'].apply(
+            lambda lst: [d['name'] for d in lst] if isinstance(lst, list) else []
+        )
 
     return df
 

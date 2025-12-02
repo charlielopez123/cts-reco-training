@@ -14,5 +14,6 @@ BASIC_FEATURES: FeatureSpec = {
     "revenue":             ("revenue",             int,                          0),
     "vote_average":        ("vote_average",        float,                        0.0),
     "genres":              ("genres",              List[Dict[str, Any]],          []),
+    "keywords":            ("keywords",            List[Dict[str, Any]],          []),  # Extracted from nested keywords.keywords
 }
 

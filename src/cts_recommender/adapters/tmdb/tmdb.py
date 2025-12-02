@@ -108,7 +108,10 @@ class TMDB_API():
     def get_movie_details(self, movie_id: str) -> Dict[str, Any] | None:
         """Fetches full movie details from a given movie_id"""
         try:
-            response = self._client.get(f'movie/{movie_id}', params={'language': 'fr'})
+            response = self._client.get(f'movie/{movie_id}', params={
+                'language': 'fr',
+                'append_to_response': 'keywords'
+            })
             return response
         except HTTPError as e:
             if e.response.status_code == 404:
@@ -254,4 +257,9 @@ class TMDB_API():
             return None
 
         movie_features = {k: v for k, v in details.items() if k in BASIC_FEATURES.keys()}
+
+        # Extract nested keywords list from keywords.keywords structure
+        if 'keywords' in movie_features and isinstance(movie_features['keywords'], dict):
+            movie_features['keywords'] = movie_features['keywords'].get('keywords', [])
+
         return movie_features

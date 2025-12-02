@@ -128,7 +128,8 @@ class TestAddMovieAgeFeature:
         assert 'movie_age' in result.columns
         assert result['movie_age'].iloc[0] == current_year - 2020
         assert result['movie_age'].iloc[1] == current_year - 2000
-        assert 'release_date' not in result.columns
+        # release_date is kept for diversity reward calculations
+        assert 'release_date' in result.columns
 
 
 class TestFinalizeCatalogFeatures:
@@ -170,9 +171,12 @@ class TestBuildCatalogFeatures:
 
         result = build_catalog_features(df)
 
-        # Check genre features were added
-        assert 'genre_Action' in result.columns
-        assert 'genre_Drama' in result.columns
+        # Check genres are kept as list (not one-hot encoded for catalog)
+        assert 'genres' in result.columns
+        assert isinstance(result['genres'].iloc[0], list)
+
+        # Check keywords column was added (even if empty)
+        assert 'keywords' in result.columns
 
         # Check movie age was calculated
         assert 'movie_age' in result.columns
@@ -180,9 +184,9 @@ class TestBuildCatalogFeatures:
         # Check booleans converted to int
         assert result['is_movie'].dtype == 'int64'
 
-        # Check tmdb_id was dropped
-        assert 'tmdb_id' not in result.columns
+        # Check tmdb_id is preserved (needed for catalog)
+        assert 'tmdb_id' in result.columns
 
-        # Check intermediate columns dropped
-        assert 'genres' not in result.columns
-        assert 'release_date' not in result.columns
+        # Check genres and release_date are preserved (not one-hot encoded for catalog)
+        assert 'genres' in result.columns
+        assert 'release_date' in result.columns

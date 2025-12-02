@@ -64,6 +64,9 @@ def build_catalog_features(enriched_df: pd.DataFrame) -> pd.DataFrame:
     # Process TMDB features (all catalog entries are movies)
     df = feature_transformations.process_tmdb_features(enriched_df, is_movie=True)
 
+    # Extract keyword names from TMDB keywords structure
+    df = feature_transformations.extract_keyword_names(df)
+
     # Add movie age
     df = feature_transformations.add_movie_age_feature(df)
 
