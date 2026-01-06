@@ -41,7 +41,10 @@ GEMINI.md
 docs/
 *.md
 !README.md
-!baselines_evaluation/README.md
+
+# --- Baselines evaluation (experimental) ---
+baselines_evaluation/
+src/cts_recommender/baselines/
 
 # --- macOS files ---
 .DS_Store

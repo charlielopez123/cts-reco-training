@@ -332,6 +332,12 @@ class RewardCalculator:
 
         # Look at recent programming (e.g., last 25 movies)
         recent_programming = self.memory[-1:-25:-1]
+        # Filter to only include movies still in catalog (handle expired rights)
+        recent_programming = [mid for mid in recent_programming if mid in self.catalog_df.index]
+
+        # If no valid recent movies, return neutral
+        if not recent_programming:
+            return 0.3
 
         # Calculate diversity metrics
         diversity_scores = []

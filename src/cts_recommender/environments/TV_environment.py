@@ -90,13 +90,17 @@ class TVProgrammingEnvironment:
         Note:
             Converts input to pd.Timestamp to ensure compatibility with datetime64[ns] columns
             after enforce_dtypes() is applied to the catalog.
+
+            This method filters only by TV rights validity, NOT by available_broadcasts quota.
+            This aligns with IL training behavior where curator choices are always considered
+            regardless of catalog broadcast quotas.
         """
         # Convert to pandas Timestamp for comparison with datetime64[ns] columns
         date_ts = pd.Timestamp(date)
 
+        # Filter by TV rights only (removed available_broadcasts filter to align with IL training)
         available_mask = ((self.catalog_df['tv_rights_end'] > date_ts) &
-                            (self.catalog_df['tv_rights_start'] < date_ts) &
-                            (self.catalog_df['available_broadcasts'] > 0))
+                            (self.catalog_df['tv_rights_start'] < date_ts))
 
         self.available_movies = self.catalog_df[available_mask].index.tolist()
 
