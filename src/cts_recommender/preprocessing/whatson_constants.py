@@ -50,7 +50,7 @@ FILM_COLLECTION_KEYWORDS = [
 ]
 
 DATE_COLS = [
-        'start_rights', 'end_rights',
-        'date_diff_1', 'date_last_diff',
-        'date_rediff_1', 'date_rediff_2', 'date_rediff_3', 'date_rediff_4'
+        'tv_rights_start', 'tv_rights_end',
+        'first_broadcast_date', 'last_broadcast_date',
+        'rebroadcast_date_1', 'rebroadcast_date_2', 'rebroadcast_date_3', 'rebroadcast_date_4'
     ]
