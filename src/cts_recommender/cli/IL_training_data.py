@@ -7,6 +7,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from cts_recommender.environments.schemas import ContextMode
 from cts_recommender.pipelines import IL_training_data_pipeline
 from cts_recommender.settings import get_settings
 
@@ -74,7 +75,18 @@ def main():
         help="Date to split train/val (YYYY-MM-DD, optional)"
     )
 
+    parser.add_argument(
+        "--context-mode",
+        type=str,
+        choices=["general", "rts_curtain"],
+        default="general",
+        help="Context mode: general (18-dim) or rts_curtain (21-dim)"
+    )
+
     args = parser.parse_args()
+
+    # Parse context mode
+    context_mode = ContextMode.RTS_CURTAIN if args.context_mode == "rts_curtain" else ContextMode.GENERAL
 
     try:
         training_data, out_file = IL_training_data_pipeline.run_IL_training_data_pipeline(
@@ -84,7 +96,8 @@ def main():
             out_file=args.out,
             gamma=args.gamma,
             negative_sampling_ratio=args.negative_ratio,
-            time_split_date=args.split_date
+            time_split_date=args.split_date,
+            context_mode=context_mode
         )
 
         logger.info(f"SUCCESS: Training data saved to {out_file}")
