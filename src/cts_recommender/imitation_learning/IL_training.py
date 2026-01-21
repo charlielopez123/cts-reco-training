@@ -1,13 +1,14 @@
 import pandas as pd
 import logging
 from tqdm.auto import tqdm
-from typing import Dict, List
+from typing import Dict, List, Optional, Union
 import numpy as np
 
 
 
 from cts_recommender.environments.TV_environment import TVProgrammingEnvironment
-from cts_recommender.environments.schemas import Context, Season, Channel
+from cts_recommender.environments.schemas import Context, CurtainContext, ContextMode, Season, Channel
+from cts_recommender.environments.curtains import get_curtain_for_broadcast
 from cts_recommender.RTS_constants import INTEREST_CHANNELS
 from cts_recommender.features.whatson_schema import SHOWINGS_COLUMNS
 from cts_recommender.imitation_learning.IL_constants import PSEUDO_REWARD_WEIGHTS
@@ -18,21 +19,23 @@ logger = logging.getLogger(__name__)
 
 class HistoricalDataProcessor:
     """
-    Processes historical programming data for offline training, using past programming decisions 
+    Processes historical programming data for offline training, using past programming decisions
     to train the curator model and warm start the Contextual Thompson Sampler weights
     """
-    def __init__(self, 
+    def __init__(self,
                 environment: TVProgrammingEnvironment,
                 historical_data: pd.DataFrame,
                 gamma: float = 0.6,
                 negative_sampling_ratio: float = 5,
-                time_split_date: str = None):
-        
+                time_split_date: str = None,
+                context_mode: ContextMode = ContextMode.GENERAL):
+
         self.env = environment
         self.historical_df = historical_data
-        self.gamma = gamma # Weighting factor for curator selection value signal vs the other pseudo-reward signals
-        self.negative_sampling_ratio = negative_sampling_ratio # Ratio of negative samples to positive samples
-        self.time_split_date = time_split_date # Split date for temporal validation (format: 'YYYY-MM-DD') for training/validation split
+        self.gamma = gamma
+        self.negative_sampling_ratio = negative_sampling_ratio
+        self.time_split_date = time_split_date
+        self.context_mode = context_mode
 
 
     def extract_training_samples(self) -> List[Dict]:
@@ -86,11 +89,20 @@ class HistoricalDataProcessor:
         self.env.memory = []
         self.env.reward.memory = self.env.memory
 
-        # Iterate through each row of the interest channel's historical decisions
-        for _, row in tqdm(interest_channel_historical_df.iterrows(), total=len(interest_channel_historical_df), desc="Processing rows"): 
+        # Track skipped broadcasts for curtain mode
+        skipped_outside_curtain = 0
 
-            # Create context from historical data
-            context = self._create_context_from_row(row)
+        # Iterate through each row of the interest channel's historical decisions
+        for _, row in tqdm(interest_channel_historical_df.iterrows(), total=len(interest_channel_historical_df), desc="Processing rows"):
+
+            # Create context based on mode
+            if self.context_mode == ContextMode.RTS_CURTAIN:
+                context = self._create_curtain_context_from_row(row)
+                if context is None:
+                    skipped_outside_curtain += 1
+                    continue
+            else:
+                context = self._create_context_from_row(row)
 
             air_date = row['date']
 
@@ -129,6 +141,8 @@ class HistoricalDataProcessor:
             all_samples.extend(neg_samples)
 
         logger.info(f"Created {num_successful_samples} positive samples")
+        if self.context_mode == ContextMode.RTS_CURTAIN:
+            logger.info(f"Skipped {skipped_outside_curtain} broadcasts outside curtain time windows")
 
         return all_samples
 
@@ -167,10 +181,23 @@ class HistoricalDataProcessor:
             channel=channel,
         )
 
+    def _create_curtain_context_from_row(self, row: pd.Series) -> Optional[CurtainContext]:
+        """Create CurtainContext from historical data row, or None if outside curtain times."""
+        curtain_id = get_curtain_for_broadcast(
+            row['start_time'],
+            row['channel'],
+            row['weekday']
+        )
+        if curtain_id is None:
+            return None
+
+        air_date = row['date'].date() if hasattr(row['date'], 'date') else row['date']
+        return self.env.create_curtain_context(air_date, curtain_id, row['channel'])
+
     def generate_negative_samples(self,
                                 pos_sample: Dict,
                                 row: pd.Series,
-                                context: Context,
+                                context: Union[Context, CurtainContext],
                                 times_shown_tracker: TimesShownTracker | None = None) -> List[Dict]:
         """
         Generate negative samples for a given positive sample by randomly selecting movies that were NOT chosen.
@@ -178,7 +205,7 @@ class HistoricalDataProcessor:
         Args:
             pos_sample: The positive sample dictionary
             row: The historical data row corresponding to the positive sample
-            context: The Context object for the programming decision
+            context: The Context or CurtainContext object for the programming decision
             times_shown_tracker: Optional TimesShownTracker for dynamic times_shown computation
         Returns:
             List of negative sample dictionaries
@@ -198,10 +225,13 @@ class HistoricalDataProcessor:
             self.env.available_movies, size=self.negative_sampling_ratio, replace=False
         )
 
+        # For reward calculation, always use general Context (has hour for audience model)
+        reward_context = self._create_context_from_row(row)
+
         context_features = pos_sample['context_features']
         for neg_movie_id in negative_movie_ids:
             movie_features = self.env.get_movie_features(neg_movie_id)
-            rewards = self.env.reward.compute_total_reward(neg_movie_id, row['date'], context, times_shown_tracker)
+            rewards = self.env.reward.compute_total_reward(neg_movie_id, row['date'], reward_context, times_shown_tracker)
             pseudo_reward = sum(rewards[component] * PSEUDO_REWARD_WEIGHTS[component] for component in PSEUDO_REWARD_WEIGHTS.keys())
             negative_samples.append({
                         'context_features': context_features,

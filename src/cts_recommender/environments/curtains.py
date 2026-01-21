@@ -152,6 +152,8 @@ RTS2_RIDEAU_1 = CurtainDefinition(
     channel="RTS 2",
     display_name="Rideau 1",
     end_time=time(20, 50),
+    start_range_min=time(20, 10),
+    start_range_max=time(20, 30),
     content_type="Movies before 20:50",
 )
 
@@ -342,3 +344,50 @@ def get_curtains_for_channel(channel: str) -> List[CurtainDefinition]:
     if channel not in CURTAINS_BY_CHANNEL:
         raise CurtainValidationError(f"Unknown channel '{channel}'. Expected 'RTS 1' or 'RTS 2'")
     return CURTAINS_BY_CHANNEL[channel]
+
+
+def get_curtain_for_broadcast(
+    start_time: str,
+    channel: str,
+    day_of_week: int
+) -> Optional[str]:
+    """
+    Map broadcast timing to curtain_id using start_range boundaries.
+
+    Uses start_range_min and start_range_max to determine valid curtain windows.
+    A broadcast belongs to a curtain if its start time falls within [start_range_min, start_range_max].
+
+    Args:
+        start_time: Broadcast start time in "HH:MM:SS" format
+        channel: Channel name ("RTS 1" or "RTS 2")
+        day_of_week: Day of week as int (0=Monday, 5=Saturday, 6=Sunday)
+
+    Returns:
+        curtain_id if the broadcast fits a curtain slot, None otherwise
+    """
+    parts = start_time.split(":")
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    broadcast_minutes = hours * 60 + minutes
+
+    curtains = CURTAINS_BY_CHANNEL.get(channel, [])
+
+    for curtain in curtains:
+        if curtain.allowed_days is not None and day_of_week not in curtain.allowed_days:
+            continue
+
+        if curtain.start_range_min is None or curtain.start_range_max is None:
+            continue
+
+        lower_minutes = curtain.start_range_min.hour * 60 + curtain.start_range_min.minute
+        upper_minutes = curtain.start_range_max.hour * 60 + curtain.start_range_max.minute
+
+        # Handle midnight crossover (e.g., 22:30-00:00)
+        if upper_minutes <= lower_minutes:
+            if broadcast_minutes >= lower_minutes or broadcast_minutes < upper_minutes:
+                return curtain.curtain_id
+        else:
+            if lower_minutes <= broadcast_minutes < upper_minutes:
+                return curtain.curtain_id
+
+    return None
