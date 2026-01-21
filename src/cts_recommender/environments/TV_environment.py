@@ -1,15 +1,31 @@
-import pandas as pd
-from typing import Optional
-from datetime import datetime, date
-from typing import Union, Tuple, Dict
-import numpy as np
 import logging
+from datetime import date, datetime
+from typing import Dict, List, Optional, Tuple, Union
+
+import numpy as np
+import pandas as pd
 
 from cts_recommender.RTS_constants import COMPETITOR_CHANNELS, INTEREST_CHANNELS
-from cts_recommender.environments.reward import RewardCalculator
-from cts_recommender.models.audience_regression.audience_ratings_regressor import AudienceRatingsRegressor
 from cts_recommender.competition.competitor import CompetitorDataManager
-from cts_recommender.environments.schemas import Context, TimeSlot, Season, Channel
+from cts_recommender.environments.curtains import (
+    get_curtain_definition,
+    get_curtain_type_one_hot,
+    validate_curtain_for_channel,
+    validate_curtain_for_day,
+)
+from cts_recommender.environments.reward import RewardCalculator
+from cts_recommender.environments.schemas import (
+    Channel,
+    Context,
+    ContextMode,
+    CurtainContext,
+    Season,
+    TimeSlot,
+)
+from cts_recommender.models.audience_regression.audience_ratings_regressor import (
+    AudienceRatingsRegressor,
+)
+from cts_recommender.utils.dates import get_season
 from cts_recommender.utils.scalers import make_safe_positive_pipeline
 
 logger = logging.getLogger(__name__)
@@ -20,11 +36,20 @@ class TVProgrammingEnvironment:
             catalog_df: pd.DataFrame,
             historical_programming_df: Optional[pd.DataFrame] = None,
             audience_model: AudienceRatingsRegressor = None,
+            context_mode: ContextMode = ContextMode.GENERAL,
             ):
-        
         self.catalog_df = catalog_df
         self.historical_programming_df = historical_programming_df
         self.audience_model = audience_model
+
+        # Context mode determines feature dimensions
+        self.context_mode = context_mode
+        if context_mode == ContextMode.RTS_CURTAIN:
+            # 7 curtain_type + 7 day_of_week + 1 weekend + 4 season + 2 channel = 21
+            self.context_dim = 21
+        else:
+            # 4 time_slot + 7 day_of_week + 1 weekend + 4 season + 2 channel = 18
+            self.context_dim = 18
 
         # Separate historical programming by interest channels with competitors
         if self.historical_programming_df is not None:
@@ -111,63 +136,126 @@ class TVProgrammingEnvironment:
             self.memory.pop(0)
         self.memory.append(catalog_id)
 
-    def get_context_features(self, context: Union[Context, Tuple]) -> Tuple[np.ndarray, Tuple]:
-
+    def get_context_features(
+        self, context: Union[Context, CurtainContext, Tuple]
+    ) -> Tuple[np.ndarray, Tuple]:
         """
-        Convert context to feature vector from either a given Context or previous context_cache_key
+        Convert context to feature vector.
 
-        feature_vector = [time_slot_hot (4,), day_of_week_hot (7,), is_weekend (1,), season_one_hot (4,), channel_one_hot (2,)] -> shape: (18,)
+        For Context (general mode): 18 dims
+            [time_slot(4), day(7), weekend(1), season(4), channel(2)]
 
-        Channel is now included in the feature vector to allow CTS to learn channel-specific signal preferences.
+        For CurtainContext (rts_curtain mode): 21 dims
+            [curtain_type(7), day(7), weekend(1), season(4), channel(2)]
         """
-        # Cache key for efficiency (includes channel)
         if isinstance(context, tuple):
-            cache_key = context
+            if context in self.context_features_cache:
+                return self.context_features_cache[context], context
+            raise ValueError(f"Cache key {context} not found")
+
+        if isinstance(context, CurtainContext):
+            return self._encode_curtain_context(context)
         else:
-            cache_key = (context.hour, context.day_of_week,
-                        context.month, context.season.value, context.channel.value)
+            return self._encode_general_context(context)
+
+    def _encode_general_context(self, context: Context) -> Tuple[np.ndarray, Tuple]:
+        """Encode Context (general mode) to 18-dim feature vector."""
+        cache_key = (
+            context.hour,
+            context.day_of_week,
+            context.month,
+            context.season.value,
+            context.channel.value,
+        )
 
         if cache_key in self.context_features_cache:
             return self.context_features_cache[cache_key], cache_key
 
-        # Extract values from context (handle both Context object and tuple)
-        if isinstance(context, tuple):
-            hour, day_of_week, _, season_value, channel_value = context
-        else: # Context object
-            hour = context.hour
-            day_of_week = context.day_of_week
-            season_value = context.season.value
-            channel_value = context.channel.value
+        features: List[int] = []
 
-        features = []
-
-        # Slot hour of showing into 4 different TimeSlot
-        time_slot_value = self.get_time_slot(hour).value
-        time_slots = [time_slot.value for time_slot in TimeSlot]
-        time_slot_features = [1 if time_slot == time_slot_value else 0 for time_slot in time_slots]
+        # Time slot one-hot (4 dims)
+        time_slot = self.get_time_slot(context.hour)
+        time_slot_features = [1 if ts == time_slot else 0 for ts in TimeSlot]
         features.extend(time_slot_features)
 
-        # Day-of-week one-hot (0=Monday ... 6=Sunday)
-        dow_one_hot = [1 if day_of_week == i else 0 for i in range(7)]
-        features.extend(dow_one_hot)
+        # Day-of-week one-hot (7 dims)
+        features.extend([1 if context.day_of_week == i else 0 for i in range(7)])
 
-        # Weekend flag
-        is_weekend = 1 if day_of_week >= 5 else 0
-        features.append(is_weekend)
+        # Weekend flag (1 dim)
+        features.append(1 if context.day_of_week >= 5 else 0)
 
-        # Season one-hot
-        seasons = [season.value for season in Season]
-        season_features = [1 if season == season_value else 0 for season in seasons]
-        features.extend(season_features)
+        # Season one-hot (4 dims)
+        features.extend([1 if s == context.season else 0 for s in Season])
 
-        # Channel one-hot (RTS1, RTS2)
-        channels = [channel.value for channel in Channel]
-        channel_features = [1 if channel == channel_value else 0 for channel in channels]
-        features.extend(channel_features)
+        # Channel one-hot (2 dims)
+        features.extend([1 if c == context.channel else 0 for c in Channel])
 
         feature_vector = np.array(features, dtype=np.float32)
         self.context_features_cache[cache_key] = feature_vector
         return feature_vector, cache_key
+
+    def _encode_curtain_context(self, context: CurtainContext) -> Tuple[np.ndarray, Tuple]:
+        """Encode CurtainContext (rts_curtain mode) to 21-dim feature vector."""
+        cache_key = (
+            "curtain",  # Prefix to distinguish from general mode cache keys
+            context.curtain_type.value,
+            context.day_of_week,
+            context.month,
+            context.season.value,
+            context.channel.value,
+        )
+
+        if cache_key in self.context_features_cache:
+            return self.context_features_cache[cache_key], cache_key
+
+        features: List[int] = []
+
+        # Curtain type one-hot (7 dims)
+        features.extend(get_curtain_type_one_hot(context.curtain_type))
+
+        # Day-of-week one-hot (7 dims)
+        features.extend([1 if context.day_of_week == i else 0 for i in range(7)])
+
+        # Weekend flag (1 dim)
+        features.append(1 if context.day_of_week >= 5 else 0)
+
+        # Season one-hot (4 dims)
+        features.extend([1 if s == context.season else 0 for s in Season])
+
+        # Channel one-hot (2 dims)
+        features.extend([1 if c == context.channel else 0 for c in Channel])
+
+        feature_vector = np.array(features, dtype=np.float32)
+        self.context_features_cache[cache_key] = feature_vector
+        return feature_vector, cache_key
+
+    def create_curtain_context(
+        self, air_date: date, curtain_id: str, channel: str
+    ) -> CurtainContext:
+        """Create CurtainContext for RTS curtain mode from a date and curtain ID."""
+        validate_curtain_for_channel(curtain_id, channel)
+        validate_curtain_for_day(curtain_id, air_date.weekday())
+
+        curtain_def = get_curtain_definition(curtain_id)
+
+        return CurtainContext(
+            curtain_type=curtain_def.curtain_type,
+            curtain_id=curtain_id,
+            day_of_week=air_date.weekday(),
+            month=air_date.month,
+            season=Season(get_season(air_date)),
+            channel=Channel(channel),
+        )
+
+    def create_context(self, air_date: date, hour: int, channel: str) -> Context:
+        """Create Context for general mode from a date and hour."""
+        return Context(
+            hour=hour,
+            day_of_week=air_date.weekday(),
+            month=air_date.month,
+            season=Season(get_season(air_date)),
+            channel=Channel(channel),
+        )
 
 
     def get_movie_features(self, catalog_id: str) -> np.ndarray:

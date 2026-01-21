@@ -50,13 +50,13 @@ def get_season(x: date) -> str:
     d = _to_date(x)
     month = d.month
     if month in [12, 1, 2]:
-        return 'winter'
+        return "winter"
     elif month in [3, 4, 5]:
-        return 'spring'
+        return "spring"
     elif month in [6, 7, 8]:
-        return 'summer'
+        return "summer"
     else:
-        return 'fall'
+        return "autumn"
 
 
 

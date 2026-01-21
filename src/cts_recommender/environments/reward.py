@@ -189,7 +189,7 @@ class RewardCalculator:
         season_cols = [col for col in feature_names if col.startswith('season_')]
         for season_col in season_cols:
             features[season_col] = 0
-        season_value = context.season.value  # e.g., 'winter', 'spring', 'summer', 'fall'
+        season_value = context.season.value  # e.g., 'winter', 'spring', 'summer', 'autumn'
         season_col_name = f'season_{season_value}'
         if season_col_name in feature_names:
             features[season_col_name] = 1
