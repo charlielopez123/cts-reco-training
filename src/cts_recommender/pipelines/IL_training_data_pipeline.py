@@ -193,7 +193,9 @@ def run_IL_training_data_pipeline(
     training_samples = processor.extract_training_samples()
 
     # Save raw samples for visualization (used by CTS warm-start pipeline)
-    samples_file = out_file.parent / "training_samples.joblib"
+    # Derive samples filename from output file (training_data.joblib -> training_samples.joblib)
+    samples_filename = out_file.name.replace("training_data", "training_samples")
+    samples_file = out_file.parent / samples_filename
     logger.info(f"Saving raw training samples to {samples_file}...")
     joblib.dump(training_samples, samples_file)
     logger.info(f"Saved {len(training_samples)} raw samples")
