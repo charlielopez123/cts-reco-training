@@ -18,11 +18,16 @@ OUT_IL_TRAINING_DATA ?= data/processed/IL/training_data.joblib
 OUT_CURATOR_MODEL ?= data/models/curator_logistic_model.joblib
 OUT_CTS_MODEL ?= data/models/cts_model.npz
 
+# Curtain mode outputs (21-dim context)
+OUT_IL_TRAINING_DATA_CURTAIN ?= data/processed/IL/curtain_mode/training_data_curtain.joblib
+OUT_CURATOR_MODEL_CURTAIN ?= data/models/curtain_mode/curator_logistic_model_curtain.joblib
+OUT_CTS_MODEL_CURTAIN ?= data/models/curtain_mode/cts_model_curtain.npz
+
 LOG_LEVEL ?= INFO
 
 ##--------- Hyperparameters Config -------------------------------------------
-CURATOR_GAMMA ?=0.4 # Weighting for curator signal in IL reward function
-CTS_GAMMA ?=0.3 # Curator signal weight for CTS initialization (30% curator, 70% value signals)
+CURATOR_GAMMA ?= 0.4  # Weighting for curator signal in IL reward function
+CTS_LR_WARMSTART ?= 0.005  # Learning rate for warm-start (conservative to avoid overfitting to binary data)
 
 
 # SSL Configuration - Use certifi's CA bundle for HTTPS requests (macOS fix)
@@ -31,7 +36,7 @@ export REQUESTS_CA_BUNDLE := $(shell .venv/bin/python -c "import certifi; print(
 # ---- Defaults -------------------------------------------------------------
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
-.PHONY: help setup bootstrap lint fmt fix test prepare-programming train-audience-ratings extract-whatson historical-programming extract-IL-training-data train-curator-model train-cts-model interactive-test run-all clean env
+.PHONY: help setup bootstrap lint fmt fix test prepare-programming train-audience-ratings extract-whatson historical-programming extract-IL-training-data extract-IL-training-data-curtain train-curator-model train-curator-model-curtain train-cts-model train-cts-model-curtain interactive-test run-all clean env
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## / - /'
@@ -135,8 +140,36 @@ train-cts-model: ## Train Contextual Thompson Sampler with warm-start
 	mkdir -p $(dir $(OUT_CTS_MODEL))
 	LOG_LEVEL=$(LOG_LEVEL) uv run cts-reco-train-cts-model \
 		--training-data $(OUT_IL_TRAINING_DATA) \
+		--curator-model $(OUT_CURATOR_MODEL) \
 		--out $(OUT_CTS_MODEL) \
-		--gamma $(CTS_GAMMA)
+		--lr-warmstart $(CTS_LR_WARMSTART) \
+		--lr-bias-ratio 1.0
+
+# ---- Curtain Mode Targets (21-dim context) --------------------------------
+extract-IL-training-data-curtain: ## Extract curtain mode IL training data (21-dim context)
+	mkdir -p $(dir $(OUT_IL_TRAINING_DATA_CURTAIN))
+	LOG_LEVEL=$(LOG_LEVEL) uv run cts-reco-extract-IL-training-data \
+		--historical $(OUT_HISTORICAL_PROGRAMMING) \
+		--catalog $(OUT_WHATSON_CATALOG) \
+		--audience-model $(MODEL_OUTPUT) \
+		--out $(OUT_IL_TRAINING_DATA_CURTAIN) \
+		--gamma $(CURATOR_GAMMA) \
+		--context-mode rts_curtain
+
+train-curator-model-curtain: ## Train curtain mode curator logistic regression model
+	mkdir -p $(dir $(OUT_CURATOR_MODEL_CURTAIN))
+	LOG_LEVEL=$(LOG_LEVEL) uv run cts-reco-train-curator-model \
+		--training-data $(OUT_IL_TRAINING_DATA_CURTAIN) \
+		--out $(OUT_CURATOR_MODEL_CURTAIN)
+
+train-cts-model-curtain: ## Train curtain mode CTS with warm-start (21-dim context)
+	mkdir -p $(dir $(OUT_CTS_MODEL_CURTAIN))
+	LOG_LEVEL=$(LOG_LEVEL) uv run cts-reco-train-cts-model \
+		--training-data $(OUT_IL_TRAINING_DATA_CURTAIN) \
+		--curator-model $(OUT_CURATOR_MODEL_CURTAIN) \
+		--out $(OUT_CTS_MODEL_CURTAIN) \
+		--lr-warmstart $(CTS_LR_WARMSTART) \
+		--lr-bias-ratio 1.0
 
 interactive-test: ## Run interactive CTS testing in terminal
 	LOG_LEVEL=$(LOG_LEVEL) uv run cts-reco-interactive-test \

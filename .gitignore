@@ -46,5 +46,8 @@ docs/
 baselines_evaluation/
 src/cts_recommender/baselines/
 
+# --- Experiment outputs (generated) ---
+experiments/outputs/
+
 # --- macOS files ---
 .DS_Store
