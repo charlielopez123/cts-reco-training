@@ -35,6 +35,13 @@ def main():
         help="Path to save trained CTS model (.npz)"
     )
 
+    parser.add_argument(
+        "--curator-model",
+        type=Path,
+        default=cfg.models_dir / "curator_logistic_model.joblib",
+        help="Path to trained curator model (.joblib) for computing curator signal"
+    )
+
     # Logging
     parser.add_argument(
         "--log-level",
@@ -42,20 +49,20 @@ def main():
         help="Logging level (DEBUG, INFO, WARNING, ERROR)"
     )
 
-    # Weight initialization
-    parser.add_argument(
-        "--gamma",
-        type=float,
-        default=0.3,
-        help="Curator signal weight for initialization (default: 0.3)"
-    )
-
     # Warm-start hyperparameters
     parser.add_argument(
         "--lr-warmstart",
         type=float,
-        default=0.01,
-        help="Learning rate for warm-start training (default: 0.01)"
+        default=0.005,
+        help="Learning rate for warm-start training (default: 0.005)"
+    )
+
+    parser.add_argument(
+        "--lr-bias-ratio",
+        type=float,
+        default=0.1,
+        help="Bias learning rate ratio during warm-start (default: 0.1 = 10x slower). "
+             "Set to 1.0 for normal bias learning."
     )
 
     parser.add_argument(
@@ -153,12 +160,16 @@ def main():
     # Convert monitor_every=0 to None
     monitor_every = args.monitor_every if args.monitor_every > 0 else None
 
+    # Convert lr_bias_ratio=1.0 to None (normal learning)
+    lr_bias_ratio = args.lr_bias_ratio if args.lr_bias_ratio != 1.0 else None
+
     try:
         cts, model_path = CTS_warmstart_training_pipeline.run_CTS_warmstart_training_pipeline(
             training_data_file=args.training_data,
             model_output_file=args.out,
-            gamma=args.gamma,
+            curator_model_file=args.curator_model,
             lr_warmstart=args.lr_warmstart,
+            lr_bias_ratio=lr_bias_ratio,
             lr_online=args.lr_online,
             expl_scale_warmstart=args.expl_scale_warmstart,
             expl_scale_online=args.expl_scale_online,

@@ -11,9 +11,7 @@ import numpy as np
 
 from cts_recommender.environments.schemas import Context
 from cts_recommender.environments.TV_environment import TVProgrammingEnvironment
-
-
-SIGNAL_NAMES = ['audience', 'competition', 'diversity', 'novelty', 'rights', 'curator_prob']
+from cts_recommender.imitation_learning.IL_constants import SIGNAL_NAMES
 
 
 def display_recommendations(
@@ -159,7 +157,7 @@ def compute_signal_vector(
         curator_model: Curator acceptance probability model
 
     Returns:
-        Signal vector: [audience, competition, diversity, novelty, rights, curator_prob]
+        Signal vector in SIGNAL_NAMES order: [curator, audience, competition, diversity, novelty, rights]
     """
     # Compute standard rewards
     rewards = env.reward.compute_total_reward(
@@ -174,14 +172,14 @@ def compute_signal_vector(
     combined_features = np.concatenate([context_features, movie_features])
     curator_prob = float(curator_model.predict_proba(combined_features.reshape(1, -1))[0, 1])
 
-    # Build signal vector
+    # Build signal vector in SIGNAL_NAMES order (curator first)
     return np.array([
+        curator_prob,           # curator FIRST
         rewards['audience'],
         rewards['competition'],
         rewards['diversity'],
         rewards['novelty'],
         rewards['rights'],
-        curator_prob
     ])
 
 

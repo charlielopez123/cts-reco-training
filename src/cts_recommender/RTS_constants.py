@@ -35,6 +35,55 @@ HISTORICAL_PROGRAMMING_COLUMNS = [
 
 INTEREST_CHANNELS = ['RTS 1', 'RTS 2']
 
+# General mode context features (18 dims)
+# time_slot(4) + day(7) + weekend(1) + season(4) + channel(2)
+CONTEXT_FEATURE_NAMES = [
+    "prime_time",
+    "late_night",
+    "afternoon",
+    "morning",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "is_weekend",
+    "spring",
+    "summer",
+    "autumn",
+    "winter",
+    "RTS 1",
+    "RTS 2",
+]
+
+# RTS curtain mode context features (21 dims)
+# curtain_type(7) + day(7) + weekend(1) + season(4) + channel(2)
+CURTAIN_CONTEXT_FEATURE_NAMES = [
+    "fiction_matin",
+    "apres_midi_1",
+    "apres_midi_2",
+    "rideau_1",
+    "rideau_2",
+    "rideau_3",
+    "rideau_4",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "is_weekend",
+    "spring",
+    "summer",
+    "autumn",
+    "winter",
+    "RTS 1",
+    "RTS 2",
+]
+
 # Competition Channels
 COMPETITOR_CHANNELS = [
     "France 2", "France 3", "M6_T_PL", "TF1_T_PL"

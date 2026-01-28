@@ -7,7 +7,7 @@ from cts_recommender.io import readers
 from cts_recommender.settings import get_settings
 from cts_recommender.preprocessing.whatson_constants import *
 from cts_recommender import RTS_constants
-from cts_recommender.preprocessing import dates
+from cts_recommender.utils import dates
 
 
 def load_whatson_catalog_csv(csv_path: Path) -> pd.DataFrame: 

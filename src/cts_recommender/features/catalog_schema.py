@@ -67,7 +67,7 @@ CATALOG_DTYPES = {
     # Other
     'external_reference': 'string',
 
-    # Note: 'genres' is a list type, handled separately
+    # Note: 'genres' and 'keywords' are list types, handled separately
 }
 
 # Historical Programming Schema

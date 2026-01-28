@@ -34,6 +34,7 @@ import joblib
 from typing import Optional
 
 from cts_recommender.environments.TV_environment import TVProgrammingEnvironment
+from cts_recommender.environments.schemas import ContextMode
 from cts_recommender.models.audience_regression.audience_ratings_regressor import AudienceRatingsRegressor
 from cts_recommender.imitation_learning.IL_training import HistoricalDataProcessor
 from cts_recommender.io import readers
@@ -51,7 +52,8 @@ def run_IL_training_data_pipeline(
     out_file: Optional[Path] = None,
     gamma: float = 0.6,
     negative_sampling_ratio: int = 5,
-    time_split_date: Optional[str] = None
+    time_split_date: Optional[str] = None,
+    context_mode: ContextMode = ContextMode.GENERAL
 ) -> tuple[dict, Path]:
     """
     Extract training data for imitation learning from historical programming decisions.
@@ -131,6 +133,7 @@ def run_IL_training_data_pipeline(
     logger.info(f"Audience model: {audience_model_file}")
     logger.info(f"Gamma (curator weight): {gamma}")
     logger.info(f"Negative sampling ratio: {negative_sampling_ratio}")
+    logger.info(f"Context mode: {context_mode.value}")
 
     # Load data
     logger.info("Loading historical programming data...")
@@ -168,9 +171,10 @@ def run_IL_training_data_pipeline(
     env = TVProgrammingEnvironment(
         catalog_df=catalog_df,
         historical_programming_df=historical_df,
-        audience_model=audience_model
+        audience_model=audience_model,
+        context_mode=context_mode
     )
-    logger.info("Environment initialized")
+    logger.info(f"Environment initialized with context_dim={env.context_dim}")
 
     # Create historical data processor
     logger.info("Initializing historical data processor...")
@@ -179,7 +183,8 @@ def run_IL_training_data_pipeline(
         historical_data=historical_df,
         gamma=gamma,
         negative_sampling_ratio=negative_sampling_ratio,
-        time_split_date=time_split_date
+        time_split_date=time_split_date,
+        context_mode=context_mode
     )
     logger.info("Processor initialized")
 
@@ -187,8 +192,10 @@ def run_IL_training_data_pipeline(
     logger.info("Extracting training samples (this may take a while)...")
     training_samples = processor.extract_training_samples()
 
-    # Save raw samples for visualization
-    samples_file = out_file.parent / f"training_samples_gamma{gamma}.joblib"
+    # Save raw samples for visualization (used by CTS warm-start pipeline)
+    # Derive samples filename from output file (training_data.joblib -> training_samples.joblib)
+    samples_filename = out_file.name.replace("training_data", "training_samples")
+    samples_file = out_file.parent / samples_filename
     logger.info(f"Saving raw training samples to {samples_file}...")
     joblib.dump(training_samples, samples_file)
     logger.info(f"Saved {len(training_samples)} raw samples")

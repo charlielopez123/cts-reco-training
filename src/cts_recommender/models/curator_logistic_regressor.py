@@ -7,7 +7,6 @@ from pathlib import Path
 
 import joblib
 import numpy as np
-from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -17,7 +16,6 @@ from sklearn.metrics import (
     log_loss,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
 
 
 logger = logging.getLogger(__name__)
@@ -92,56 +90,41 @@ def _load_and_prepare_data(training_data_file: str) -> tuple:
     return X_train, y_train, X_val, y_val
 
 
-def _train_base_model(X_train: np.ndarray, y_train: np.ndarray) -> LogisticRegression:
+def _train_calibrated_model(
+    X_train: np.ndarray, y_train: np.ndarray, cv: int = 5
+) -> CalibratedClassifierCV:
     """
-    Train base logistic regression model with balanced class weights.
+    Train a calibrated logistic regression model using cross-validation.
+
+    Uses sigmoid (Platt scaling) calibration with CV, which:
+    - Preserves ROC-AUC (discrimination ability)
+    - Dramatically improves ECE (calibration quality)
+    - Avoids the data-hungry nature of isotonic calibration
+    - Uses all training data efficiently via cross-validation
 
     Args:
         X_train: Training features.
         y_train: Training labels.
+        cv: Number of cross-validation folds for calibration.
 
     Returns:
-        Trained LogisticRegression model.
+        Calibrated CalibratedClassifierCV model.
     """
-    logger.info("Training curator logistic regression model...")
-    model = LogisticRegression(
-        class_weight="balanced",  # Handle class imbalance
+    logger.info(f"Training calibrated model with {cv}-fold CV sigmoid calibration...")
+
+    base_model = LogisticRegression(
+        class_weight="balanced",
         max_iter=5000,
         random_state=42,
     )
-    model.fit(X_train, y_train)
-    return model
 
+    calibrated_model = CalibratedClassifierCV(
+        estimator=base_model,
+        method="sigmoid",  # Platt scaling - works well with small datasets
+        cv=cv,
+    )
 
-def _calibrate_model(
-    model: LogisticRegression, X_cal: np.ndarray, y_cal: np.ndarray
-) -> CalibratedClassifierCV:
-    """
-    Calibrate model probabilities using isotonic regression.
-
-    Args:
-        model: Trained base model.
-        X_cal: Calibration features.
-        y_cal: Calibration labels.
-
-    Returns:
-        Calibrated model.
-    """
-    logger.info("Calibrating model with isotonic regression...")
-
-    # sklearn 1.6+ deprecation: cv='prefit' will be removed in 1.8
-    # For now, we use try/except for compatibility
-    try:
-        calibrated_model = CalibratedClassifierCV(
-            estimator=model, method="isotonic", cv="prefit"
-        )
-    except TypeError:
-        # Fallback for older sklearn versions
-        calibrated_model = CalibratedClassifierCV(
-            base_estimator=model, method="isotonic", cv="prefit"
-        )
-
-    calibrated_model.fit(X_cal, y_cal)
+    calibrated_model.fit(X_train, y_train)
     return calibrated_model
 
 
@@ -172,11 +155,14 @@ def train_curator_model(training_data_file: str, model_output_file: str) -> None
 
     Training pipeline:
     1. Load training and validation data
-    2. Train LogisticRegression with class_weight='balanced' on full training set
-    3. Split validation set into calibration/test (50/50)
-    4. Calibrate model using isotonic regression on calibration set
-    5. Evaluate on held-out test set with comprehensive metrics
-    6. Save calibrated model
+    2. Train LogisticRegression with CV sigmoid calibration on training set
+    3. Evaluate on full validation set with comprehensive metrics
+    4. Save calibrated model
+
+    Uses 5-fold CV with sigmoid (Platt scaling) calibration which:
+    - Preserves ROC-AUC while dramatically improving probability calibration
+    - Works well with imbalanced/small datasets (only 2 parameters vs isotonic's N)
+    - Uses all training data efficiently via cross-validation
 
     The model predicts the probability that a curator would select a given movie
     for broadcast, based on context features (time, day, etc.) and movie features
@@ -189,40 +175,30 @@ def train_curator_model(training_data_file: str, model_output_file: str) -> None
     # Step 1: Load and prepare data
     X_train, y_train, X_val, y_val = _load_and_prepare_data(training_data_file)
 
-    # Step 2: Split validation into calibration and test sets
-    X_cal, X_test, y_cal, y_test = train_test_split(
-        X_val, y_val, test_size=0.5, random_state=42, stratify=y_val
-    )
-    logger.info(f"Calibration data shape: {X_cal.shape}")
-    logger.info(f"Test data shape: {X_test.shape}")
+    # Step 2: Train calibrated model using CV sigmoid calibration
+    calibrated_model = _train_calibrated_model(X_train, y_train, cv=5)
 
-    # Step 3: Train base model
-    model = _train_base_model(X_train, y_train)
+    # Step 3: Evaluate on full validation set
+    logger.info("Evaluating calibrated model on validation set...")
+    y_pred = calibrated_model.predict(X_val)
+    y_pred_proba = calibrated_model.predict_proba(X_val)[:, 1]
 
-    # Step 4: Calibrate model
-    calibrated_model = _calibrate_model(model, X_cal, y_cal)
+    # Calculate metrics
+    accuracy = accuracy_score(y_val, y_pred)
+    logloss = log_loss(y_val, y_pred_proba, labels=[0, 1])
+    roc_auc = roc_auc_score(y_val, y_pred_proba)
+    brier = brier_score_loss(y_val, y_pred_proba)
+    ece = _expected_calibration_error(y_val, y_pred_proba, n_bins=10)
 
-    # Step 5: Evaluate on test set
-    logger.info("Evaluating calibrated model on test set...")
-    y_pred = calibrated_model.predict(X_test)
-    y_pred_proba = calibrated_model.predict_proba(X_test)[:, 1]
-
-    # Calculate standard classification metrics
-    accuracy = accuracy_score(y_test, y_pred)
-    logloss = log_loss(y_test, y_pred_proba, labels=[0, 1])
-    roc_auc = roc_auc_score(y_test, y_pred_proba)
-    brier = brier_score_loss(y_test, y_pred_proba)
-    ece = _expected_calibration_error(y_test, y_pred_proba, n_bins=10)
-
-    # Log overall metrics
-    logger.info(f"\nTest Accuracy@0.5: {accuracy:.4f}")
-    logger.info(f"Test ROC-AUC: {roc_auc:.4f}")
-    logger.info(f"Test Log Loss: {logloss:.4f}")
-    logger.info(f"Test Brier Score: {brier:.4f}")
+    # Log metrics
+    logger.info(f"\nValidation Accuracy@0.5: {accuracy:.4f}")
+    logger.info(f"Validation ROC-AUC: {roc_auc:.4f}")
+    logger.info(f"Validation Log Loss: {logloss:.4f}")
+    logger.info(f"Validation Brier Score: {brier:.4f}")
     logger.info(f"Expected Calibration Error (ECE@10): {ece:.4f}")
-    logger.info("Classification Report:\n" + classification_report(y_test, y_pred, zero_division=0))
+    logger.info("Classification Report:\n" + classification_report(y_val, y_pred, zero_division=0))
 
-    # Step 6: Save model
+    # Step 4: Save model
     logger.info(f"Saving trained and calibrated model to {model_output_file}")
     joblib.dump(calibrated_model, model_output_file)
     logger.info("Curator model training and calibration complete.")

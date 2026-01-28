@@ -219,6 +219,7 @@ class ContextualThompsonSampler:
         r: float,
         y_signals: Optional[np.ndarray] = None,
         lr: Optional[float] = None,
+        lr_bias_ratio: Optional[float] = None,
         return_diagnostics: bool = False,
         ) -> Optional[dict]:
         """
@@ -233,6 +234,8 @@ class ContextualThompsonSampler:
             r: Binary reward (1=success, 0=failure)
             y_signals: Optional curator-indicated signals that mattered (num_signals binary vector)
             lr: Override learning rate for this update (None uses default)
+            lr_bias_ratio: Ratio for bias learning rate (None = same as lr, 0.1 = 10x slower).
+                          Useful during warm-start to prevent bias from dominating.
             return_diagnostics: If True, return dict with gradient and parameter info
 
         Returns:
@@ -277,7 +280,9 @@ class ContextualThompsonSampler:
         if lr is None:
             lr = self.lr
         self.U -= lr * grad_U_L
-        self.b -= lr * grad_b_L
+        # Apply slower learning rate to bias if ratio provided (used during warm-start)
+        lr_b = lr * lr_bias_ratio if lr_bias_ratio is not None else lr
+        self.b -= lr_b * grad_b_L
 
         # ---- 7) Return diagnostics if requested ----
         if return_diagnostics:
@@ -295,6 +300,7 @@ class ContextualThompsonSampler:
                 rewards: Union[np.ndarray, float],
                 epochs: int = 1,
                 lr: float = 1e-3,
+                lr_bias_ratio: Optional[float] = None,
                 expl_scale: Optional[float] = None,
                 ema_decay: Optional[float] = None,
                 tau: Optional[float] = None,
@@ -317,6 +323,10 @@ class ContextualThompsonSampler:
             rewards: Binary rewards - single float or batch (n_samples,)
             epochs: Number of passes through batch data (only used for batches)
             lr: Learning rate for warm-start (typically lower than online lr)
+            lr_bias_ratio: Ratio for bias learning rate during warm-start (None = same as lr).
+                          Use 0.01-0.1 to slow bias learning, preventing signal weight collapse
+                          when training on large datasets. Only applies during warm-start;
+                          online updates use full learning rate for bias.
             expl_scale: Override exploration scale during warm-start (None = keep current)
             ema_decay: Override EMA decay during warm-start (None = keep current)
             tau: Override softmax temperature during warm-start (None = keep current)
@@ -329,10 +339,10 @@ class ContextualThompsonSampler:
             Optional dict with training history if monitor_every is set
 
         Example:
-            >>> # Monitor training every 500 updates with regularization
+            >>> # Monitor training every 500 updates with regularization and slow bias
             >>> history = cts.warm_start(contexts, signals, rewards, epochs=5, lr=1e-3,
-            ...                          expl_scale=0.01, weight_decay=1e-4,
-            ...                          monitor_every=500, verbose=True)
+            ...                          lr_bias_ratio=0.01, expl_scale=0.01,
+            ...                          weight_decay=1e-4, monitor_every=500, verbose=True)
             >>> # Plot training curves
             >>> plt.plot(history['update_steps'], history['grad_U_norm'])
         """
@@ -385,7 +395,7 @@ class ContextualThompsonSampler:
                 c_t = contexts
                 s_i = signals
                 r = rewards
-                self.update(c_t, s_i, r, lr=lr)
+                self.update(c_t, s_i, r, lr=lr, lr_bias_ratio=lr_bias_ratio)
             # Batch case - run for specified epochs
             else:
                 n = len(rewards)
@@ -402,7 +412,7 @@ class ContextualThompsonSampler:
 
                         # Update with diagnostics if monitoring
                         if monitor_every is not None:
-                            diag = self.update(c_t, s_i, r, lr=lr, return_diagnostics=True)
+                            diag = self.update(c_t, s_i, r, lr=lr, lr_bias_ratio=lr_bias_ratio, return_diagnostics=True)
                             epoch_losses.append(diag['loss'])
 
                             # Record metrics every N updates
@@ -426,7 +436,7 @@ class ContextualThompsonSampler:
                                 history['noise_std_U'].append(np.sqrt(self.expl_scale / self.h_U.mean()))
                                 history['noise_std_b'].append(np.sqrt(self.expl_scale / self.h_b.mean()))
                         else:
-                            self.update(c_t, s_i, r, lr=lr)
+                            self.update(c_t, s_i, r, lr=lr, lr_bias_ratio=lr_bias_ratio)
 
                         update_count += 1
 

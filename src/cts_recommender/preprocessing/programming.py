@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 from cts_recommender.io.readers import read_rdata, read_json
 from cts_recommender.features.TV_programming_Rdata_schema import ORIGINAL_PROGRAMMING_COLUMNS, PROGRAMMING_RENAME_MAP
-from cts_recommender.preprocessing import dates
+from cts_recommender.utils import dates
 from cts_recommender.settings import get_settings
 
 cfg = get_settings()
