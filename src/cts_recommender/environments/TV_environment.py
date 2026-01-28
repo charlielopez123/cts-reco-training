@@ -105,29 +105,39 @@ class TVProgrammingEnvironment:
         )
 
 
-    def get_available_movies(self, date: Union[datetime, date]):
+    def get_available_movies(self, date: Union[datetime, date], times_shown_tracker=None):
         """
         Get movies available for the given context (rights not expired), updates self.available_movies.
 
         Args:
             date: Date to check availability (datetime or date object)
+            times_shown_tracker: Optional TimesShownTracker for dynamic broadcast quota checking.
+                If provided, filters out movies that have exhausted their broadcast quota
+                at this date (total_broadcasts - times_shown <= 0).
+                If None, only filters by TV rights validity.
 
         Note:
             Converts input to pd.Timestamp to ensure compatibility with datetime64[ns] columns
             after enforce_dtypes() is applied to the catalog.
-
-            This method filters only by TV rights validity, NOT by available_broadcasts quota.
-            This aligns with IL training behavior where curator choices are always considered
-            regardless of catalog broadcast quotas.
         """
         # Convert to pandas Timestamp for comparison with datetime64[ns] columns
         date_ts = pd.Timestamp(date)
 
-        # Filter by TV rights only (removed available_broadcasts filter to align with IL training)
+        # Base filter: TV rights validity
         available_mask = ((self.catalog_df['tv_rights_end'] > date_ts) &
                             (self.catalog_df['tv_rights_start'] < date_ts))
 
-        self.available_movies = self.catalog_df[available_mask].index.tolist()
+        available_ids = self.catalog_df[available_mask].index.tolist()
+
+        # If tracker provided, filter by remaining broadcast quota at decision time
+        if times_shown_tracker is not None:
+            available_ids = [
+                movie_id for movie_id in available_ids
+                if (self.catalog_df.loc[movie_id, 'total_broadcasts'] -
+                    times_shown_tracker.get_times_shown(movie_id, date_ts)) > 0
+            ]
+
+        self.available_movies = available_ids
 
 
     def update_memory(self, catalog_id: str):

@@ -137,7 +137,7 @@ class HistoricalDataProcessor:
             num_successful_samples += 1
 
             # Generate negative samples (movies that could have been shown but weren't)
-            neg_samples = self.generate_negative_samples(pos_sample, row, context)
+            neg_samples = self.generate_negative_samples(pos_sample, row, context, times_shown_tracker)
             all_samples.extend(neg_samples)
 
         logger.info(f"Created {num_successful_samples} positive samples")
@@ -214,7 +214,8 @@ class HistoricalDataProcessor:
         negative_samples = []
 
         # Update available movies based on historical data up to the air date
-        self.env.get_available_movies(row['date'])
+        # Pass tracker to filter by remaining broadcast quota at decision time
+        self.env.get_available_movies(row['date'], times_shown_tracker)
 
         # Remove the actual movie that was shown
         if pos_sample['movie_id'] in self.env.available_movies:
